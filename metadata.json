@@ -1,0 +1,5 @@
+{
+  "name": "Dsporty Production Manager",
+  "description": "A production tracking dashboard for tracking sportswear manufacturing, calculating piece-rates, and generating audit reports.",
+  "requestFramePermissions": []
+}
