@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
     Trash2, CheckCircle, Package, Plus, X, Camera, User, 
     TrendingUp, Search, Image as ImageIcon, Printer, Check, 
     FileSpreadsheet, Target, Activity, LayoutList, Moon, Sun,
     UserSearch, AlertTriangle, Grid, Save, ArrowDown, LogOut,
-    AlertOctagon, Lock
+    AlertOctagon, Lock, Wifi, WifiOff, RefreshCw
 } from 'lucide-react';
 
 import { supabase } from './services/supabase';
@@ -55,6 +55,10 @@ function App() {
         return saved === 'dark';
     });
 
+    // Network State
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
+    const [isSyncing, setIsSyncing] = useState(false);
+
     // Filtros Administrativos
     const [adminSearchTerm, setAdminSearchTerm] = useState('');
     const [timeRange, setTimeRange] = useState<TimeRange>('today'); 
@@ -83,6 +87,85 @@ function App() {
             localStorage.setItem('theme', 'light');
         }
     }, [darkMode]);
+
+    // Função de Sincronização
+    const syncOfflineData = useCallback(async () => {
+        const saved = localStorage.getItem('dsporty_offline_data');
+        if (!saved) return;
+        
+        try {
+            const localRecords = JSON.parse(saved);
+            // Identifica registros que começam com 'local_' (salvos offline)
+            const pendingRecords = localRecords.filter((r: any) => 
+                r.id && r.id.toString().startsWith('local_')
+            );
+
+            if (pendingRecords.length > 0) {
+                setIsSyncing(true);
+                setFormError(`Sincronizando ${pendingRecords.length} registros pendentes...`);
+                
+                let successCount = 0;
+
+                for (const record of pendingRecords) {
+                    // Prepara payload removendo o ID local e formatando timestamp
+                    const payload = {
+                        exporter: record.exporter,
+                        product: record.product,
+                        quantity: record.quantity,
+                        materialId: record.materialId,
+                        imageDataUrl: record.imageDataUrl,
+                        timestamp: record.timestamp, // Já deve estar em ISO string no storage
+                        verified: false
+                    };
+
+                    const { error } = await supabase.from('production_records').insert(payload);
+                    
+                    if (!error) {
+                        successCount++;
+                        // Remove o registro local da memória para evitar duplicação visual
+                        // A subscrição realtime vai trazer o registro oficial em breve
+                        setRecords(prev => prev.filter(p => p.id !== record.id));
+                    }
+                }
+
+                if (successCount > 0) {
+                    setFormError(`Sincronização concluída! ${successCount} enviados.`);
+                    setTimeout(() => setFormError(''), 3000);
+                    
+                    // Atualiza o localStorage removendo os itens sincronizados
+                    const remaining = localRecords.filter((r: any) => !r.id.toString().startsWith('local_'));
+                    // Nota: Idealmente buscaríamos do Supabase novamente, mas por segurança mantemos o cache limpo
+                    localStorage.setItem('dsporty_offline_data', JSON.stringify(remaining));
+                }
+            }
+        } catch (e) {
+            console.error("Erro na sincronização:", e);
+        } finally {
+            setIsSyncing(false);
+        }
+    }, []);
+
+    // Monitor de Rede
+    useEffect(() => {
+        const handleOnline = () => {
+            setIsOnline(true);
+            syncOfflineData();
+        };
+        const handleOffline = () => setIsOnline(false);
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        // Tenta sincronizar ao carregar se estiver online
+        if (navigator.onLine) {
+            syncOfflineData();
+        }
+
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, [syncOfflineData]);
 
     // Auth Effect (Supabase Anonymous)
     useEffect(() => {
@@ -121,6 +204,25 @@ function App() {
 
     // Data Effect (Supabase Realtime)
     useEffect(() => {
+        // Se estiver offline, não tenta conectar no realtime, apenas carrega local
+        if (!isOnline) {
+             const saved = localStorage.getItem('dsporty_offline_data');
+             if (saved) {
+                 try {
+                     const parsed = JSON.parse(saved);
+                     const hydrated = parsed.map((r: any) => ({
+                         ...r,
+                         timestamp: {
+                             toDate: () => new Date(r.timestamp),
+                             toMillis: () => new Date(r.timestamp).getTime()
+                         }
+                     }));
+                     setRecords(hydrated);
+                 } catch (e) { console.error("Failed to load local data", e); }
+             }
+             return;
+        }
+
         if (!userId) return;
 
         const fetchRecords = async () => {
@@ -161,7 +263,6 @@ function App() {
         const channel = supabase
             .channel('public:production_records')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'production_records' }, (payload) => {
-                // Optional: You can handle payload.new here directly, but fetching all ensures consistency
                 fetchRecords();
             })
             .subscribe((status) => {
@@ -175,7 +276,7 @@ function App() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [userId]);
+    }, [userId, isOnline]); // Adicionado isOnline dependency
 
     // Lógica de Filtro Combinado (Tempo + Busca)
     const filteredByTimeRecords = useMemo(() => {
@@ -281,6 +382,10 @@ function App() {
     }, [filteredByTimeRecords]);
 
     const toggleVerify = async (id: string, currentStatus: boolean) => {
+        if (!isOnline) {
+            setFormError("Ação indisponível offline.");
+            return;
+        }
         try {
             const { error } = await supabase
                 .from('production_records')
@@ -329,6 +434,12 @@ function App() {
         e.preventDefault();
         const exporter = newExporter.trim().toUpperCase();
         if (!exporter) { setFormError('Informe o nome do colaborador'); return; }
+
+        // Validação de Imagem Obrigatória
+        if (!newImageBase64) {
+            setFormError('É obrigatório anexar uma foto para finalizar o registro.');
+            return;
+        }
         
         let itemsToSubmit = [...batchItems];
         if (newQuantity && newMaterialId) {
@@ -364,7 +475,22 @@ function App() {
         setNewMaterialId('');
         setFormError('');
 
-        // 3. Process Background Request
+        // 3. Process Background Request OR Offline Save
+        if (!isOnline) {
+            setRecords(prev => {
+                const updated = prev.map(r => {
+                    if (r.id.startsWith(tempIdBase)) {
+                        return { ...r, id: r.id.replace(tempIdBase, `local_${Date.now()}`) };
+                    }
+                    return r;
+                });
+                saveToLocalStorage(updated);
+                return updated;
+            });
+            setFormError('Sem internet. Salvo localmente! Enviaremos quando reconectar.');
+            return;
+        }
+
         try {
             const dbPayload = itemsToSubmit.map(item => ({
                 exporter, 
@@ -394,7 +520,7 @@ function App() {
         } catch (e) { 
             console.error("Erro no envio, salvando offline", e);
             
-            // 5. Handle Offline Fallback
+            // 5. Handle Offline Fallback (if request failed despite online status)
             // Convert temp IDs to stable local IDs so they persist correctly
             setRecords(prev => {
                 const updated = prev.map(r => {
@@ -408,7 +534,7 @@ function App() {
                 saveToLocalStorage(updated);
                 return updated;
             });
-            setFormError('Salvo localmente (sincronização pendente).');
+            setFormError('Erro na conexão. Salvo localmente.');
         }
     };
 
@@ -441,6 +567,10 @@ function App() {
     };
 
     const handleDatabaseWipe = async () => {
+        if (!isOnline) {
+            setDeleteFeedback("Necessário estar online para limpar o banco.");
+            return;
+        }
         if (deletePasswordInput.trim() !== ADMIN_MASTER_KEY) {
             setDeleteFeedback("Senha incorreta!");
             return;
@@ -540,6 +670,21 @@ function App() {
     return (
         <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#FDFDFF] text-slate-900'}`}>
             
+            {/* Aviso de Status Offline/Sincronização */}
+            <div className={`w-full px-4 py-1 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-colors duration-300 ${isOnline ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500 text-white'}`}>
+                {isSyncing ? (
+                    <>
+                       <RefreshCw size={12} className="animate-spin" /> Sincronizando dados...
+                    </>
+                ) : isOnline ? (
+                    <span className="hidden">Online</span>
+                ) : (
+                    <>
+                        <WifiOff size={12} /> Você está Offline. Salvando no dispositivo.
+                    </>
+                )}
+            </div>
+
             <header className="sticky top-0 z-40 px-6 py-4 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 no-print">
                 <div className="max-w-5xl mx-auto flex items-center justify-between">
                     <div className="flex items-center gap-4">
@@ -553,6 +698,11 @@ function App() {
                     </div>
 
                     <div className="flex items-center gap-2 sm:gap-4">
+                        {/* Status Icon Small Screens */}
+                        <div className={`sm:hidden p-2 rounded-full ${isOnline ? 'text-emerald-500' : 'text-rose-500 bg-rose-100'}`}>
+                            {isOnline ? <Wifi size={16} /> : <WifiOff size={16} />}
+                        </div>
+
                         {/* Botão Tema */}
                         <button 
                             onClick={() => setDarkMode(!darkMode)}
@@ -626,8 +776,8 @@ function App() {
                                 </h2>
 
                                 {formError && (
-                                    <div className="mb-6 p-4 bg-rose-50 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900 rounded-2xl flex items-start gap-3 text-rose-600 relative z-10">
-                                        <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                                    <div className={`mb-6 p-4 border rounded-2xl flex items-start gap-3 relative z-10 ${formError.includes('concluída') ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800 text-emerald-600' : 'bg-rose-50 dark:bg-rose-950/30 border-rose-100 dark:border-rose-900 text-rose-600'}`}>
+                                        {formError.includes('concluída') ? <CheckCircle size={18} className="shrink-0 mt-0.5" /> : <AlertTriangle size={18} className="shrink-0 mt-0.5" />}
                                         <p className="text-[10px] font-black uppercase leading-tight">{formError}</p>
                                     </div>
                                 )}
