@@ -682,7 +682,7 @@ function App() {
                     </>
                 ) : (
                     <>
-                        <WifiOff size={12} /> OFFLINE • SALVANDO NO DISPOSITIVO
+                        <WifiOff size={12} /> SEM INTERNET • MODO OFFLINE ATIVO
                     </>
                 )}
             </div>
@@ -848,8 +848,13 @@ function App() {
                                             <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
                                         </label>
 
-                                        <button type="submit" className="w-full h-16 bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:shadow-xl hover:bg-emerald-400 transition-all disabled:opacity-50 disabled:hover:shadow-none disabled:hover:bg-emerald-500 flex items-center justify-center gap-2" disabled={batchItems.length === 0 && (!newQuantity || !newMaterialId)}>
-                                            <Save size={16} /> FINALIZAR & GRAVAR
+                                        <button 
+                                            type="submit" 
+                                            className={`w-full h-16 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:shadow-xl transition-all disabled:opacity-50 disabled:hover:shadow-none flex items-center justify-center gap-2 ${isOnline ? 'bg-emerald-500 hover:bg-emerald-400 disabled:hover:bg-emerald-500' : 'bg-amber-500 hover:bg-amber-400 disabled:hover:bg-amber-500'}`}
+                                            disabled={batchItems.length === 0 && (!newQuantity || !newMaterialId)}
+                                        >
+                                            {isOnline ? <Save size={16} /> : <WifiOff size={16} />} 
+                                            {isOnline ? 'FINALIZAR & GRAVAR' : 'GRAVAR LOCALMENTE (OFFLINE)'}
                                         </button>
                                     </div>
 
