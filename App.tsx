@@ -671,16 +671,18 @@ function App() {
         <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#FDFDFF] text-slate-900'}`}>
             
             {/* Aviso de Status Offline/Sincronização */}
-            <div className={`w-full px-4 py-1 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-colors duration-300 ${isOnline ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500 text-white'}`}>
+            <div className={`w-full px-4 py-2 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-colors duration-300 ${isOnline ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-rose-500 text-white'}`}>
                 {isSyncing ? (
                     <>
                        <RefreshCw size={12} className="animate-spin" /> Sincronizando dados...
                     </>
                 ) : isOnline ? (
-                    <span className="hidden">Online</span>
+                    <>
+                        <Wifi size={12} /> ONLINE • DADOS SINCRONIZADOS
+                    </>
                 ) : (
                     <>
-                        <WifiOff size={12} /> Você está Offline. Salvando no dispositivo.
+                        <WifiOff size={12} /> OFFLINE • SALVANDO NO DISPOSITIVO
                     </>
                 )}
             </div>
